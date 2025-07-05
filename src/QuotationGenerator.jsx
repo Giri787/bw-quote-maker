@@ -18,6 +18,8 @@ const vehicleTypes = [
     payload: 1000,
     cft: 210,
     referCharges: 15000,
+    operationalHours: 12,
+    operationDays: 26,
   },
   {
     name: 'Eicher EV',
@@ -29,15 +31,16 @@ const vehicleTypes = [
     payload: 1700,
     cft: 395,
     referCharges: 0,
+    operationalHours: 12,
+    operationDays: 26,
   },
 ];
 
 const standardRemarks = [
-  // The first bullet will be the bolded includes line
-  'Monthly charge Includes driver, phone, charging, maintenance, and parking.',
-  'EVs have no entry/exit restrictions.',
-  'Toll & MCD taxes are additional.',
-  'Deployment area: Within city and as per operational requirement.',
+  'Access: EVs are permitted entry and exit without restrictions, unless specified by local authorities.',
+  'Tolls & Taxes: Toll and municipal charges are additional and billed at actuals.',
+  "Deployment: Operations are within city limits or as per the client's agreed operational needs.",
+  'GST: Monthly rates are exclusive of GST, which will be charged additionally as applicable.'
 ];
 
 function getVehicleDefaults(typeName) {
@@ -52,8 +55,21 @@ function getVehicleDefaults(typeName) {
         payload: found.payload.toString(),
         cft: found.cft.toString(),
         referCharges: found.referCharges ? found.referCharges.toString() : '',
+        operationalHours: found.operationalHours ? found.operationalHours.toString() : '12',
+        operationDays: found.operationDays ? found.operationDays.toString() : '26',
       }
-    : { monthlyCharge: '', fixedKm: '', extraKmRate: '', overtimeHr: '', loaderCharges: '', payload: '', cft: '', referCharges: '' };
+    : { monthlyCharge: '', fixedKm: '', extraKmRate: '', overtimeHr: '', loaderCharges: '', payload: '', cft: '', referCharges: '', operationalHours: '12', operationDays: '26' };
+}
+
+function formatCustomerName(name) {
+  // Remove extra spaces, capitalize each word, remove non-word chars for file name
+  return name
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ')
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join('')
+    .replace(/[^a-zA-Z0-9]/g, '');
 }
 
 export default function QuotationGenerator() {
@@ -61,6 +77,10 @@ export default function QuotationGenerator() {
   const [customerName, setCustomerName] = useState('');
   const [clientContactName, setClientContactName] = useState('');
   const [clientContactPhone, setClientContactPhone] = useState('');
+  const [clientLocation, setClientLocation] = useState('');
+  const [chargingByClient, setChargingByClient] = useState(false);
+  const [parkingByClient, setParkingByClient] = useState(false);
+  const [includeLoaderCharges, setIncludeLoaderCharges] = useState(true);
   const [additionalRemarks, setAdditionalRemarks] = useState('');
   const [vehicles, setVehicles] = useState([
     {
@@ -130,6 +150,8 @@ export default function QuotationGenerator() {
           'payload',
           'cft',
           'referCharges',
+          'operationalHours',
+          'operationDays',
         ].includes(field)) {
           value = value.replace(/[^\d]/g, '');
         }
@@ -174,9 +196,11 @@ export default function QuotationGenerator() {
         ['fixedKm', 'Fixed km'],
         ['extraKmRate', 'Extra km rate'],
         ['overtimeHr', 'Overtime/hr'],
-        ['loaderCharges', 'Loader charges'],
+        ...(includeLoaderCharges ? [['loaderCharges', 'Loader charges']] : []),
         ['payload', 'Payload'],
         ['cft', 'CFT'],
+        ['operationalHours', 'Operational Hours'],
+        ['operationDays', 'Operation Days'],
       ].forEach(([field, label]) => {
         if (!v[field] || Number(v[field]) <= 0) vErr[field] = `${label} required`;
       });
@@ -208,8 +232,9 @@ export default function QuotationGenerator() {
     const imgHeight = imgProps.height * ratio;
     const x = (pdfWidth - imgWidth) / 2;
     const y = 32;
+    const fileName = `${formatCustomerName(customerName) || 'Quotation'}_Quotation.pdf`;
     pdf.addImage(imgData, 'JPEG', x, y, imgWidth, imgHeight, undefined, 'FAST');
-    pdf.save(`Bluwheelz_Quotation.pdf`);
+    pdf.save(fileName);
   };
 
   // PNG Export
@@ -221,10 +246,28 @@ export default function QuotationGenerator() {
     if (logoImg) logoImg.crossOrigin = 'anonymous';
     await new Promise(res => setTimeout(res, 100));
     const canvas = await html2canvas(input, { scale: 1.5, useCORS: true, backgroundColor: '#F0F6FB', imageTimeout: 15000 });
+    const fileName = `${formatCustomerName(customerName) || 'Quotation'}_Quotation.png`;
     const link = document.createElement('a');
-    link.download = 'Bluwheelz_Quotation.png';
+    link.download = fileName;
     link.href = canvas.toDataURL('image/png', 0.7);
     link.click();
+  };
+
+  // Dynamic includes line for remarks (remove 'phone')
+  const getIncludesLine = () => {
+    let parts = ['driver', 'maintenance'];
+    if (!chargingByClient) parts.splice(1, 0, 'charging'); // after driver
+    if (!parkingByClient) parts.push('parking');
+    return `Monthly charge includes ${parts.join(', ')}.`;
+  };
+
+  // Should show 0° Refer row?
+  const showReferRow = vehicles.some(v => v.refer);
+
+  // Quotation heading for header
+  const getQuotationHeading = () => {
+    const name = formatCustomerName(customerName);
+    return name ? `${name}_Quotation` : 'Quotation';
   };
 
   return (
@@ -278,6 +321,48 @@ export default function QuotationGenerator() {
               onChange={e => setClientContactPhone(e.target.value)}
               placeholder="Contact phone number"
             />
+          </div>
+        </div>
+        <div className="mb-4">
+          <label className="block text-xs font-semibold text-[#0071BC] mb-1">Client Location (optional)</label>
+          <input
+            type="text"
+            className="w-full border border-blue-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0071BC]"
+            value={clientLocation}
+            onChange={e => setClientLocation(e.target.value)}
+            placeholder="Client location"
+          />
+        </div>
+        <div className="mb-4 flex gap-4">
+          <div className="flex items-center">
+            <input
+              type="checkbox"
+              id="chargingByClient"
+              checked={chargingByClient}
+              onChange={e => setChargingByClient(e.target.checked)}
+              className="mr-2"
+            />
+            <label htmlFor="chargingByClient" className="text-xs font-semibold text-[#0071BC]">Charging provided by client</label>
+          </div>
+          <div className="flex items-center">
+            <input
+              type="checkbox"
+              id="parkingByClient"
+              checked={parkingByClient}
+              onChange={e => setParkingByClient(e.target.checked)}
+              className="mr-2"
+            />
+            <label htmlFor="parkingByClient" className="text-xs font-semibold text-[#0071BC]">Parking provided by client</label>
+          </div>
+          <div className="flex items-center">
+            <input
+              type="checkbox"
+              id="includeLoaderCharges"
+              checked={includeLoaderCharges}
+              onChange={e => setIncludeLoaderCharges(e.target.checked)}
+              className="mr-2"
+            />
+            <label htmlFor="includeLoaderCharges" className="text-xs font-semibold text-[#0071BC]">Include Loader Charges</label>
           </div>
         </div>
         <div className="mb-4">
@@ -415,16 +500,18 @@ export default function QuotationGenerator() {
                   />
                   {errors[`vehicle${idx}`]?.overtimeHr && <div className="text-xs text-red-500">{errors[`vehicle${idx}`].overtimeHr}</div>}
                 </div>
-                <div>
-                  <label className="block text-xs font-medium mb-1">Loader Charges</label>
-                  <input
-                    type="text"
-                    className="border border-blue-100 rounded px-2 py-1 text-sm w-24"
-                    value={v.loaderCharges}
-                    onChange={e => handleVehicleChange(idx, 'loaderCharges', e.target.value)}
-                  />
-                  {errors[`vehicle${idx}`]?.loaderCharges && <div className="text-xs text-red-500">{errors[`vehicle${idx}`].loaderCharges}</div>}
-                </div>
+                {includeLoaderCharges && (
+                  <div>
+                    <label className="block text-xs font-medium mb-1">Loader Charges</label>
+                    <input
+                      type="text"
+                      className="border border-blue-100 rounded px-2 py-1 text-sm w-24"
+                      value={v.loaderCharges}
+                      onChange={e => handleVehicleChange(idx, 'loaderCharges', e.target.value)}
+                    />
+                    {errors[`vehicle${idx}`]?.loaderCharges && <div className="text-xs text-red-500">{errors[`vehicle${idx}`].loaderCharges}</div>}
+                  </div>
+                )}
                 <div>
                   <label className="block text-xs font-medium mb-1">Payload (kg)</label>
                   <input
@@ -446,14 +533,36 @@ export default function QuotationGenerator() {
                   {errors[`vehicle${idx}`]?.cft && <div className="text-xs text-red-500">{errors[`vehicle${idx}`].cft}</div>}
                 </div>
                 <div>
-                  <label className="block text-xs font-medium mb-1">0° Refer</label>
+                  <label className="block text-xs font-medium mb-1">Operational Hours</label>
                   <input
-                    type="checkbox"
-                    className="ml-2"
-                    checked={v.refer}
-                    onChange={e => handleVehicleChange(idx, 'refer', e.target.checked)}
+                    type="text"
+                    className="border border-blue-100 rounded px-2 py-1 text-sm w-24"
+                    value={v.operationalHours}
+                    onChange={e => handleVehicleChange(idx, 'operationalHours', e.target.value)}
                   />
+                  {errors[`vehicle${idx}`]?.operationalHours && <div className="text-xs text-red-500">{errors[`vehicle${idx}`].operationalHours}</div>}
                 </div>
+                <div>
+                  <label className="block text-xs font-medium mb-1">Operation Days</label>
+                  <input
+                    type="text"
+                    className="border border-blue-100 rounded px-2 py-1 text-sm w-24"
+                    value={v.operationDays}
+                    onChange={e => handleVehicleChange(idx, 'operationDays', e.target.value)}
+                  />
+                  {errors[`vehicle${idx}`]?.operationDays && <div className="text-xs text-red-500">{errors[`vehicle${idx}`].operationDays}</div>}
+                </div>
+                {showReferRow && (
+                  <div>
+                    <label className="block text-xs font-medium mb-1">0° Refer</label>
+                    <input
+                      type="checkbox"
+                      className="ml-2"
+                      checked={v.refer}
+                      onChange={e => handleVehicleChange(idx, 'refer', e.target.checked)}
+                    />
+                  </div>
+                )}
                 {v.refer && (
                   <div>
                     <label className="block text-xs font-medium mb-1">Refer Charges</label>
@@ -481,13 +590,15 @@ export default function QuotationGenerator() {
         <div className="flex items-center gap-4 mb-6 border-b pb-4 border-blue-100">
           <img src={LOGO_URL} alt="Bluwheelz Logo" className="h-16 w-auto" data-logo crossOrigin="anonymous" />
           <div>
-            <h1 className="text-2xl font-bold text-[#0071BC] tracking-wide">Quotation</h1>
+            <h1 className="text-2xl font-bold text-[#0071BC] tracking-wide">{getQuotationHeading()}</h1>
             <div className="text-sm text-gray-700 font-medium mt-1">{customerName || <span className="italic text-gray-400">Customer Name</span>}</div>
-            {(clientContactName || clientContactPhone) && (
+            {(clientContactName || clientContactPhone || clientLocation) && (
               <div className="text-xs text-gray-500 mt-1">
                 {clientContactName && <span>{clientContactName}</span>}
                 {clientContactName && clientContactPhone && <span> &middot; </span>}
                 {clientContactPhone && <span>{clientContactPhone}</span>}
+                {(clientContactName || clientContactPhone) && clientLocation && <span> &middot; </span>}
+                {clientLocation && <span>{clientLocation}</span>}
               </div>
             )}
           </div>
@@ -509,10 +620,11 @@ export default function QuotationGenerator() {
                 ['Fixed KM', v => v.fixedKm || '-'],
                 ['Extra KM Rate', v => v.extraKmRate ? `₹${v.extraKmRate}` : '-'],
                 ['Overtime/hr', v => v.overtimeHr ? `₹${v.overtimeHr}` : '-'],
-                ['Loader Charges', v => v.loaderCharges ? `₹${v.loaderCharges}` : '-'],
+                ...(includeLoaderCharges ? [['Loader Charges', v => v.loaderCharges ? `₹${v.loaderCharges}` : '-']] : []),
                 ['Payload (kg)', v => v.payload || '-'],
                 ['Volumetric Space (CFT)', v => v.cft || '-'],
-                ['0° Refer', v => v.refer ? 'Yes' : 'No'],
+                ['Operational Hours', v => v.operationalHours || '-'],
+                ['Operation Days', v => v.operationDays || '-'],
               ].map(([label, fn], idx) => (
                 <tr key={label} className={idx % 2 === 0 ? 'bg-white' : 'bg-blue-50'}>
                   <td className="py-2 px-3 font-medium text-gray-700 border-b border-blue-100">{label}</td>
@@ -521,6 +633,15 @@ export default function QuotationGenerator() {
                   ))}
                 </tr>
               ))}
+              {/* 0° Refer row only if at least one vehicle has refer selected */}
+              {showReferRow && (
+                <tr className={(7) % 2 === 0 ? 'bg-white' : 'bg-blue-50'}>
+                  <td className="py-2 px-3 font-medium text-gray-700 border-b border-blue-100">0° Refer</td>
+                  {vehicles.map((v, i) => (
+                    <td key={i} className="py-2 px-3 border-b border-blue-100">{v.refer ? 'Yes' : 'No'}</td>
+                  ))}
+                </tr>
+              )}
               {/* Custom rows */}
               {customRows.filter(row => row.label.trim()).map((row, idx) => (
                 <tr key={row.label + idx} className={(8 + idx) % 2 === 0 ? 'bg-white' : 'bg-blue-50'}>
@@ -537,8 +658,9 @@ export default function QuotationGenerator() {
         <div className="mt-6">
           <div className="font-semibold text-[#0071BC] mb-2">Remarks</div>
           <ul className="list-disc pl-5 text-xs text-gray-700 space-y-1">
+            <li className="font-bold">{getIncludesLine()}</li>
             {standardRemarks.map((r, i) => (
-              <li key={i} className={i === 0 ? 'font-bold' : ''}>{r}</li>
+              <li key={i}>{r}</li>
             ))}
             {/* Refer charges remark */}
             {vehicles.filter(v => v.refer && v.referCharges > 0).map((v, i) => (
@@ -550,9 +672,10 @@ export default function QuotationGenerator() {
             )}
           </ul>
         </div>
-        {/* Footer with address */}
+        {/* Footer with address and BluWheelz */}
         <div className="mt-8 pt-4 border-t border-blue-100 text-xs text-gray-400 text-center">
-          {BLUWHEELZ_ADDRESS}
+          <div className="font-bold" style={{ color: BRAND_COLOR, fontSize: '1rem' }}>BluWheelz</div>
+          <div>{BLUWHEELZ_ADDRESS}</div>
         </div>
       </div>
     </div>
