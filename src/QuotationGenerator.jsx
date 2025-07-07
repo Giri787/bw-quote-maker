@@ -36,6 +36,8 @@ const vehicleTypes = [
   },
 ];
 
+const OTHER_VEHICLE_TYPE = 'Other';
+
 const standardRemarks = [
   'Access: EVs are permitted entry and exit without restrictions, unless specified by local authorities.',
   'Tolls & Taxes: Toll and municipal charges are additional and billed at actuals.',
@@ -87,13 +89,15 @@ export default function QuotationGenerator() {
       type: 'TATA Ace EV',
       ...getVehicleDefaults('TATA Ace EV'),
       refer: false,
+      customName: '',
     },
   ]);
   const [customRows, setCustomRows] = useState([]); // [{ label: '', values: ['', '', ...] }]
   const [errors, setErrors] = useState({});
 
-  // Sort vehicle types alphabetically
+  // Sort vehicle types alphabetically and add 'Other' at the end
   const sortedVehicleTypes = [...vehicleTypes].sort((a, b) => a.name.localeCompare(b.name));
+  const vehicleTypeOptions = [...sortedVehicleTypes.map(vt => vt.name), OTHER_VEHICLE_TYPE];
 
   // Handle customer name input (auto-capitalize)
   const handleCustomerName = e => {
@@ -111,6 +115,7 @@ export default function QuotationGenerator() {
         type,
         ...getVehicleDefaults(type),
         refer: false,
+        customName: '',
       },
     ]);
     // Add empty value for each custom row for the new vehicle
@@ -130,8 +135,15 @@ export default function QuotationGenerator() {
         if (i !== idx) return v;
         // If vehicle type changes, autofill all fields
         if (field === 'type') {
-          const defaults = getVehicleDefaults(value);
-          return { ...v, type: value, ...defaults, refer: false };
+          if (value === OTHER_VEHICLE_TYPE) {
+            return { ...v, type: value, customName: '', ...getVehicleDefaults('') , refer: false };
+          } else {
+            const defaults = getVehicleDefaults(value);
+            return { ...v, type: value, ...defaults, refer: false, customName: '' };
+          }
+        }
+        if (field === 'customName') {
+          return { ...v, customName: value };
         }
         // For refer toggle, clear referCharges if false, autofill if true and default exists
         if (field === 'refer') {
@@ -191,6 +203,9 @@ export default function QuotationGenerator() {
     if (!customerName.trim()) errs.customerName = 'Customer name is required.';
     vehicles.forEach((v, idx) => {
       const vErr = {};
+      if (v.type === OTHER_VEHICLE_TYPE && !v.customName.trim()) {
+        vErr.customName = 'Vehicle name required';
+      }
       [
         ['monthlyCharge', 'Monthly charge'],
         ['fixedKm', 'Fixed km'],
@@ -410,7 +425,7 @@ export default function QuotationGenerator() {
                   </div>
                   {vehicles.map((v, vIdx) => (
                     <div key={vIdx}>
-                      <label className="block text-xs font-medium mb-1">{v.type}</label>
+                      <label className="block text-xs font-medium mb-1">{v.type === OTHER_VEHICLE_TYPE ? (v.customName || 'Other') : v.type}</label>
                       <input
                         type="text"
                         className="border border-blue-100 rounded px-2 py-1 text-sm w-24"
@@ -455,10 +470,22 @@ export default function QuotationGenerator() {
                     value={v.type}
                     onChange={e => handleVehicleChange(idx, 'type', e.target.value)}
                   >
-                    {sortedVehicleTypes.map((vt, i) => (
-                      <option key={i} value={vt.name}>{vt.name}</option>
+                    {vehicleTypeOptions.map((name, i) => (
+                      <option key={i} value={name}>{name}</option>
                     ))}
                   </select>
+                  {v.type === OTHER_VEHICLE_TYPE && (
+                    <input
+                      type="text"
+                      className="border border-blue-100 rounded px-2 py-1 text-sm w-32 mt-2"
+                      placeholder="Enter vehicle name"
+                      value={v.customName || ''}
+                      onChange={e => handleVehicleChange(idx, 'customName', e.target.value)}
+                      required
+                      autoFocus
+                    />
+                  )}
+                  {errors[`vehicle${idx}`]?.customName && <div className="text-xs text-red-500">{errors[`vehicle${idx}`].customName}</div>}
                 </div>
                 <div>
                   <label className="block text-xs font-medium mb-1">Monthly Charge</label>
@@ -610,7 +637,7 @@ export default function QuotationGenerator() {
               <tr className="bg-blue-50 text-[#0071BC]">
                 <th className="py-2 px-3 font-semibold text-left">Parameter</th>
                 {vehicles.map((v, i) => (
-                  <th key={i} className="py-2 px-3 font-semibold text-left">{v.type}</th>
+                  <th key={i} className="py-2 px-3 font-semibold text-left">{v.type === OTHER_VEHICLE_TYPE ? (v.customName || 'Other') : v.type}</th>
                 ))}
               </tr>
             </thead>
@@ -664,7 +691,7 @@ export default function QuotationGenerator() {
             ))}
             {/* Refer charges remark */}
             {vehicles.filter(v => v.refer && v.referCharges > 0).map((v, i) => (
-              <li key={i + 'refer'}>₹{Number(v.referCharges).toLocaleString()} additional for 0° Refer {v.type}</li>
+              <li key={i + 'refer'}>₹{Number(v.referCharges).toLocaleString()} additional for 0° Refer {v.type === OTHER_VEHICLE_TYPE ? (v.customName || 'Other') : v.type}</li>
             ))}
             {/* Additional Remarks (only if present) */}
             {additionalRemarks.trim() && (
